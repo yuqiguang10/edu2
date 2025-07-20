@@ -1,0 +1,500 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    networks:
+      - k12-network
+    restart: unless-stopped
+
+  # 后端服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=mysql+pymysql://k12user:k12password@mysql:3306/k12_edu
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - DEBUG=false
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./backend/uploads:/app/uploads
+    networks:
+      - k12-network
+    restart: unless-stopped
+
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=k12_edu
+      - MYSQL_USER=k12user
+      - MYSQL_PASSWORD=k12password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - k12-network
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - k12-network
+    restart: unless-stopped
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - k12-network
+    restart: unless-stopped
+
+  # Elasticsearch (可选)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - k12-network
+    restart: unless-stopped
+
+networks:
+  k12-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  elasticsearch_data:
+
+---
+# frontend/Dockerfile
+FROM node:18-alpine as build
+
+WORKDIR /app
+
+# 复制package文件
+COPY package*.json ./
+RUN npm ci --only=production
+
+# 复制源代码
+COPY . .
+
+# 构建应用
+RUN npm run build
+
+# 生产阶段
+FROM nginx:alpine
+
+# 复制构建产物
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# 复制nginx配置
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# 暴露端口
+EXPOSE 80
+
+# 启动nginx
+CMD ["nginx", "-g", "daemon off;"]
+
+---
+# frontend/nginx.conf
+server {
+    listen 80;
+    server_name localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # 启用gzip压缩
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+
+    # 静态资源缓存
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # 处理React Router
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API代理
+    location /api {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket支持
+    location /ws {
+        proxy_pass http://backend:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+---
+# backend/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    default-libmysqlclient-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制requirements文件
+COPY requirements/ requirements/
+RUN pip install --no-cache-dir -r requirements/production.txt
+
+# 复制应用代码
+COPY . .
+
+# 创建上传目录
+RUN mkdir -p uploads
+
+# 设置环境变量
+ENV PYTHONPATH=/app
+
+# 暴露端口
+EXPOSE 8000
+
+# 启动命令
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+---
+# docker/nginx/nginx.conf
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # 日志格式
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    # 基础配置
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    # 安全头
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+
+    # 上游服务器
+    upstream frontend {
+        server frontend:80;
+    }
+
+    upstream backend {
+        server backend:8000;
+    }
+
+    # 主服务器配置
+    server {
+        listen 80;
+        server_name localhost;
+
+        # 前端代理
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # API代理
+        location /api {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # 超时设置
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # WebSocket支持
+        location /ws {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # 健康检查
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+
+---
+# docker/redis/redis.conf
+# Redis配置文件
+bind 0.0.0.0
+port 6379
+timeout 0
+tcp-keepalive 300
+
+# 持久化配置
+save 900 1
+save 300 10
+save 60 10000
+
+# 内存配置
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+
+# 安全配置
+protected-mode no
+
+# 日志配置
+loglevel notice
+logfile ""
+
+---
+# docker/mysql/init.sql
+-- 创建数据库
+CREATE DATABASE IF NOT EXISTS k12_edu CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 创建用户
+CREATE USER IF NOT EXISTS 'k12user'@'%' IDENTIFIED BY 'k12password';
+GRANT ALL PRIVILEGES ON k12_edu.* TO 'k12user'@'%';
+FLUSH PRIVILEGES;
+
+-- 设置时区
+SET GLOBAL time_zone = '+8:00';
+
+---
+# Makefile
+.PHONY: help dev build start stop logs clean test
+
+help: ## 显示帮助信息
+	@echo "K12智能教育平台 - 可用命令:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+dev: ## 启动开发环境
+	docker-compose -f docker-compose.dev.yml up -d
+	@echo "开发环境已启动，访问 http://localhost:3000"
+
+build: ## 构建所有镜像
+	docker-compose build
+
+start: ## 启动生产环境
+	docker-compose up -d
+	@echo "生产环境已启动，访问 http://localhost"
+
+stop: ## 停止所有服务
+	docker-compose down
+
+restart: stop start ## 重启所有服务
+
+logs: ## 查看日志
+	docker-compose logs -f
+
+logs-backend: ## 查看后端日志
+	docker-compose logs -f backend
+
+logs-frontend: ## 查看前端日志
+	docker-compose logs -f frontend
+
+clean: ## 清理容器和镜像
+	docker-compose down -v --rmi all
+
+clean-volumes: ## 清理数据卷
+	docker-compose down -v
+
+test: ## 运行测试
+	docker-compose exec backend python -m pytest
+	docker-compose exec frontend npm run test
+
+init-db: ## 初始化数据库
+	docker-compose exec backend python -m app.db.init_db
+
+backup-db: ## 备份数据库
+	docker-compose exec mysql mysqldump -u k12user -pk12password k12_edu > backup_$(shell date +%Y%m%d_%H%M%S).sql
+
+health: ## 检查服务健康状态
+	@echo "检查服务状态..."
+	@curl -f http://localhost/health || echo "前端服务异常"
+	@curl -f http://localhost:8000/api/v1/health || echo "后端服务异常"
+
+---
+# .env.production
+# 生产环境配置
+COMPOSE_PROJECT_NAME=k12-edu
+
+# 数据库配置
+MYSQL_ROOT_PASSWORD=your-strong-root-password
+MYSQL_DATABASE=k12_edu
+MYSQL_USER=k12user
+MYSQL_PASSWORD=your-strong-password
+
+# 应用配置
+SECRET_KEY=your-super-secret-key-for-production
+DEBUG=false
+OPENAI_API_KEY=your-openai-api-key
+
+# 域名配置
+DOMAIN=your-domain.com
+SSL_ENABLED=false
+
+---
+# scripts/deploy.sh
+#!/bin/bash
+
+# K12教育平台部署脚本
+
+set -e
+
+echo "🚀 开始部署K12智能教育平台..."
+
+# 检查Docker是否安装
+if ! command -v docker &> /dev/null; then
+    echo "❌ Docker未安装，请先安装Docker"
+    exit 1
+fi
+
+if ! command -v docker-compose &> /dev/null; then
+    echo "❌ Docker Compose未安装，请先安装Docker Compose"
+    exit 1
+fi
+
+# 停止现有服务
+echo "🔄 停止现有服务..."
+docker-compose down
+
+# 拉取最新代码（如果是Git部署）
+if [ -d ".git" ]; then
+    echo "📦 拉取最新代码..."
+    git pull origin main
+fi
+
+# 构建镜像
+echo "🔨 构建应用镜像..."
+docker-compose build
+
+# 启动服务
+echo "🏃 启动服务..."
+docker-compose up -d
+
+# 等待服务启动
+echo "⏳ 等待服务启动..."
+sleep 30
+
+# 初始化数据库（仅首次部署）
+if [ "$1" = "--init-db" ]; then
+    echo "🗄️ 初始化数据库..."
+    docker-compose exec -T backend python -m app.db.init_db
+fi
+
+# 健康检查
+echo "🏥 检查服务健康状态..."
+for i in {1..10}; do
+    if curl -f http://localhost/health &> /dev/null; then
+        echo "✅ 前端服务正常"
+        break
+    else
+        echo "⏳ 等待前端服务启动... ($i/10)"
+        sleep 5
+    fi
+done
+
+for i in {1..10}; do
+    if curl -f http://localhost:8000/api/v1/health &> /dev/null; then
+        echo "✅ 后端服务正常"
+        break
+    else
+        echo "⏳ 等待后端服务启动... ($i/10)"
+        sleep 5
+    fi
+done
+
+echo "🎉 部署完成！"
+echo "📱 前端访问地址: http://localhost"
+echo "🔧 后端API地址: http://localhost:8000"
+echo "📚 API文档地址: http://localhost:8000/docs"

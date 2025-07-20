@@ -1,121 +1,143 @@
-// src/components/layout/Sidebar.tsx
+// frontend/src/components/layout/Sidebar.tsx
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import {
-  Home, BookOpen, FileText, Award, TrendingUp, AlertCircle,
-  Book, Users, BarChart3, Brain, MessageSquare, Calendar,
-  Settings
+import { Link, useLocation } from 'react-router-dom';
+import { 
+  Home, 
+  BookOpen, 
+  FileText, 
+  BarChart3, 
+  Users, 
+  Settings,
+  ChevronRight,
+  ChevronDown 
 } from 'lucide-react';
-import { cn } from '@/utils/helpers';
-import { ROUTES } from '@/utils/constants';
-import type { UserRole } from '@/types';
+import { usePermissions } from '@/hooks/usePermissions';
+import { RoleBasedComponent } from '@/components/auth';
 
 interface SidebarProps {
-  currentRole: UserRole;
-  collapsed: boolean;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
-interface NavigationItem {
-  id: string;
-  label: string;
-  icon: React.ElementType;
-  href: string;
-  badge?: number;
-}
+const iconMap: Record<string, React.ComponentType<any>> = {
+  Home,
+  BookOpen,
+  FileText,
+  BarChart3,
+  Users,
+  Settings,
+};
 
-const Sidebar: React.FC<SidebarProps> = ({ currentRole, collapsed }) => {
+const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const location = useLocation();
+  const { getAccessibleMenus } = usePermissions();
+  const [expandedMenus, setExpandedMenus] = React.useState<Set<string>>(new Set());
 
-  const navigationItems: Record<UserRole, NavigationItem[]> = {
-    student: [
-      { id: 'dashboard', label: '学习首页', icon: Home, href: ROUTES.STUDENT.DASHBOARD },
-      { id: 'courses', label: '我的课程', icon: BookOpen, href: ROUTES.STUDENT.COURSES },
-      { id: 'homework', label: '作业练习', icon: FileText, href: ROUTES.STUDENT.HOMEWORK, badge: 3 },
-      { id: 'exams', label: '考试测评', icon: Award, href: ROUTES.STUDENT.EXAMS },
-      { id: 'progress', label: '学���分析', icon: TrendingUp, href: ROUTES.STUDENT.PROGRESS },
-      { id: 'mistakes', label: '错题本', icon: AlertCircle, href: ROUTES.STUDENT.MISTAKES },
-      { id: 'resources', label: '学习资源', icon: Book, href: ROUTES.STUDENT.RESOURCES },
-    ],
-    teacher: [
-      { id: 'dashboard', label: '教学首页', icon: Home, href: ROUTES.TEACHER.DASHBOARD },
-      { id: 'classes', label: '班级管理', icon: Users, href: ROUTES.TEACHER.CLASSES },
-      { id: 'homework', label: '作业管理', icon: FileText, href: ROUTES.TEACHER.HOMEWORK, badge: 5 },
-      { id: 'exams', label: '考试管理', icon: Award, href: ROUTES.TEACHER.EXAMS },
-      { id: 'analytics', label: '学情分析', icon: BarChart3, href: ROUTES.TEACHER.ANALYTICS },
-      { id: 'resources', label: '教学资源', icon: Book, href: ROUTES.TEACHER.RESOURCES },
-      { id: 'ai-assistant', label: 'AI助手', icon: Brain, href: ROUTES.TEACHER.AI_ASSISTANT },
-    ],
-    parent: [
-      { id: 'dashboard', label: '监督首页', icon: Home, href: ROUTES.PARENT.DASHBOARD },
-      { id: 'child-progress', label: '孩子表现', icon: TrendingUp, href: ROUTES.PARENT.CHILD_PROGRESS },
-      { id: 'communication', label: '家校沟通', icon: MessageSquare, href: ROUTES.PARENT.COMMUNICATION, badge: 2 },
-      { id: 'schedule', label: '学习计划', icon: Calendar, href: ROUTES.PARENT.SCHEDULE },
-      { id: 'reports', label: '学习报告', icon: FileText, href: ROUTES.PARENT.REPORTS },
-    ],
-    admin: [
-      { id: 'dashboard', label: '管理首页', icon: Home, href: ROUTES.ADMIN.DASHBOARD },
-      { id: 'users', label: '用户管理', icon: Users, href: ROUTES.ADMIN.USERS },
-      { id: 'system', label: '系统管理', icon: Settings, href: ROUTES.ADMIN.SYSTEM },
-      { id: 'analytics', label: '数据分析', icon: BarChart3, href: ROUTES.ADMIN.ANALYTICS },
-      { id: 'resources', label: '资源管理', icon: Book, href: ROUTES.ADMIN.RESOURCES },
-    ],
+  const menus = getAccessibleMenus();
+
+  const toggleMenu = (menuKey: string) => {
+    const newExpanded = new Set(expandedMenus);
+    if (newExpanded.has(menuKey)) {
+      newExpanded.delete(menuKey);
+    } else {
+      newExpanded.add(menuKey);
+    }
+    setExpandedMenus(newExpanded);
   };
 
-  const items = navigationItems[currentRole] || [];
+  const isActive = (path: string) => {
+    return location.pathname === path || location.pathname.startsWith(path + '/');
+  };
+
+  const renderMenuItem = (menu: any, depth = 0) => {
+    const hasChildren = menu.children && menu.children.length > 0;
+    const isExpanded = expandedMenus.has(menu.key);
+    const Icon = iconMap[menu.icon] || Home;
+
+    return (
+      <div key={menu.key}>
+        {menu.path ? (
+          <Link
+            to={menu.path}
+            className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              isActive(menu.path)
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            }`}
+            style={{ paddingLeft: `${16 + depth * 16}px` }}
+            onClick={onClose}
+          >
+            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+            {menu.label}
+          </Link>
+        ) : (
+          <button
+            onClick={() => toggleMenu(menu.key)}
+            className={`w-full flex items-center justify-between px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            }`}
+            style={{ paddingLeft: `${16 + depth * 16}px` }}
+          >
+            <div className="flex items-center">
+              <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+              {menu.label}
+            </div>
+            {hasChildren && (
+              isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )
+            )}
+          </button>
+        )}
+
+        {hasChildren && isExpanded && (
+          <div className="ml-4">
+            {menu.children.map((child: any) => renderMenuItem(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <aside
-      className={cn(
-        'fixed left-0 top-16 h-[calc(100vh-64px)] bg-white border-r border-gray-200 transition-all duration-300 z-40',
-        collapsed ? 'w-16' : 'w-64'
+    <>
+      {/* 移动端遮罩 */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden"
+          onClick={onClose}
+        >
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-75" />
+        </div>
       )}
-    >
-      <nav className="h-full overflow-y-auto py-4">
-        <ul className="space-y-1 px-3">
-          {items.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.href;
-            
-            return (
-              <li key={item.id}>
-                <NavLink
-                  to={item.href}
-                  className={({ isActive: linkIsActive }) =>
-                    cn(
-                      'flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-                      'hover:bg-gray-100 hover:text-gray-900',
-                      (isActive || linkIsActive) && 'bg-primary-50 text-primary-700 border-r-2 border-primary-700',
-                      !isActive && !linkIsActive && 'text-gray-600',
-                      collapsed && 'justify-center'
-                    )
-                  }
-                  title={collapsed ? item.label : undefined}
-                >
-                  <Icon size={20} className={cn('flex-shrink-0', !collapsed && 'mr-3')} />
-                  
-                  {!collapsed && (
-                    <>
-                      <span className="flex-1">{item.label}</span>
-                      {item.badge && (
-                        <span className="ml-2 bg-red-100 text-red-600 text-xs font-medium px-2 py-1 rounded-full">
-                          {item.badge}
-                        </span>
-                      )}
-                    </>
-                  )}
-                  
-                  {collapsed && item.badge && (
-                    <span className="absolute left-8 top-1 bg-red-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
-                      {item.badge}
-                    </span>
-                  )}
-                </NavLink>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </aside>
+
+      {/* 侧边栏 */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="flex flex-col h-full">
+          {/* 头部 */}
+          <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
+            <span className="text-lg font-semibold text-gray-900">导航菜单</span>
+            <button
+              onClick={onClose}
+              className="lg:hidden text-gray-400 hover:text-gray-600"
+            >
+              ×
+            </button>
+          </div>
+
+          {/* 菜单列表 */}
+          <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+            {menus.map(menu => renderMenuItem(menu))}
+          </nav>
+        </div>
+      </div>
+    </>
   );
 };
 

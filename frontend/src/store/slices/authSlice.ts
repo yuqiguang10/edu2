@@ -1,8 +1,15 @@
+// frontend/src/store/slices/authSlice.ts
 import { StateCreator } from 'zustand';
 import { authAPI } from '@/api/modules/auth';
 import { storage } from '@/utils/storage';
 import { APP_CONFIG } from '@/utils/constants';
-import type { User, LoginCredentials, RegisterData } from '@/types';
+import toast from 'react-hot-toast';
+import type { 
+  User, 
+  LoginCredentials, 
+  RegisterData, 
+  PasswordChangeData 
+} from '@/types/auth';
 
 export interface AuthState {
   user: User | null;
@@ -10,6 +17,7 @@ export interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   permissions: string[];
+  roles: string[];
   loading: boolean;
   error: string | null;
 }
@@ -20,8 +28,13 @@ export interface AuthActions {
   logout: () => void;
   refreshAuth: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
+  changePassword: (data: PasswordChangeData) => Promise<void>;
   clearError: () => void;
   initializeAuth: () => void;
+  hasRole: (role: string) => boolean;
+  hasPermission: (permission: string) => boolean;
+  hasAnyRole: (roles: string[]) => boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
 }
 
 export type AuthSlice = AuthState & AuthActions;
@@ -33,6 +46,7 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
   refreshToken: null,
   isAuthenticated: false,
   permissions: [],
+  roles: [],
   loading: false,
   error: null,
 
@@ -42,27 +56,32 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
       set({ loading: true, error: null });
       
       const response = await authAPI.login(credentials);
-      const { user, token, refreshToken, permissions } = response.data;
+      const { user, access_token, refresh_token, permissions, roles } = response.data;
 
       // 保存到本地存储
-      storage.set(APP_CONFIG.TOKEN_KEY, token);
-      storage.set(APP_CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+      storage.set(APP_CONFIG.TOKEN_KEY, access_token);
+      storage.set(APP_CONFIG.REFRESH_TOKEN_KEY, refresh_token);
       storage.set(APP_CONFIG.USER_KEY, user);
 
       set({
         user,
-        token,
-        refreshToken,
+        token: access_token,
+        refreshToken: refresh_token,
         permissions,
+        roles,
         isAuthenticated: true,
         loading: false,
         error: null,
       });
+
+      toast.success('登录成功');
     } catch (error: any) {
+      const errorMessage = error.response?.data?.message || '登录失败';
       set({
         loading: false,
-        error: error.message || '登录失败',
+        error: errorMessage,
       });
+      toast.error(errorMessage);
       throw error;
     }
   },
@@ -75,11 +94,14 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
       await authAPI.register(data);
       
       set({ loading: false, error: null });
+      toast.success('注册成功，请登录');
     } catch (error: any) {
+      const errorMessage = error.response?.data?.message || '注册失败';
       set({
         loading: false,
-        error: error.message || '注册失败',
+        error: errorMessage,
       });
+      toast.error(errorMessage);
       throw error;
     }
   },
@@ -97,12 +119,15 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
       token: null,
       refreshToken: null,
       permissions: [],
+      roles: [],
       isAuthenticated: false,
       error: null,
     });
 
-    // 调用API登出（可选，因为token已经清除）
+    // 调用API登出
     authAPI.logout().catch(console.error);
+    
+    toast.success('已退出登录');
   },
 
   // 刷新认证信息
@@ -110,22 +135,34 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
     try {
       const refreshToken = get().refreshToken;
       if (!refreshToken) {
-        throw new Error('No refresh token available');
+        throw new Error('No refresh token');
       }
 
       const response = await authAPI.refreshToken(refreshToken);
-      const { token } = response.data;
+      const { access_token } = response.data;
 
-      storage.set(APP_CONFIG.TOKEN_KEY, token);
-      set({ token });
+      // 更新token
+      storage.set(APP_CONFIG.TOKEN_KEY, access_token);
+      set({ token: access_token });
+
+      // 获取最新用户信息
+      const profileResponse = await authAPI.getProfile();
+      const user = profileResponse.data;
+
+      storage.set(APP_CONFIG.USER_KEY, user);
+      set({
+        user,
+        permissions: user.permissions,
+        roles: user.roles,
+        isAuthenticated: true,
+      });
     } catch (error) {
-      // 刷新失败，清除认证信息
+      console.error('Token refresh failed:', error);
       get().logout();
-      throw error;
     }
   },
 
-  // 更新用户信息
+  // 更新用户资料
   updateProfile: async (data) => {
     try {
       set({ loading: true, error: null });
@@ -133,17 +170,42 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
       const response = await authAPI.updateProfile(data);
       const updatedUser = response.data;
 
+      // 更新本地存储和状态
       storage.set(APP_CONFIG.USER_KEY, updatedUser);
       set({
         user: updatedUser,
         loading: false,
         error: null,
       });
+
+      toast.success('资料更新成功');
     } catch (error: any) {
+      const errorMessage = error.response?.data?.message || '更新失败';
       set({
         loading: false,
-        error: error.message || '更新失败',
+        error: errorMessage,
       });
+      toast.error(errorMessage);
+      throw error;
+    }
+  },
+
+  // 修改密码
+  changePassword: async (data) => {
+    try {
+      set({ loading: true, error: null });
+      
+      await authAPI.changePassword(data);
+      
+      set({ loading: false, error: null });
+      toast.success('密码修改成功');
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || '密码修改失败';
+      set({
+        loading: false,
+        error: errorMessage,
+      });
+      toast.error(errorMessage);
       throw error;
     }
   },
@@ -153,7 +215,7 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
     set({ error: null });
   },
 
-  // 初始化认证状态（从本地存储恢复）
+  // 初始化认证状态
   initializeAuth: () => {
     const token = storage.get(APP_CONFIG.TOKEN_KEY);
     const refreshToken = storage.get(APP_CONFIG.REFRESH_TOKEN_KEY);
@@ -161,11 +223,36 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, get) => ({
 
     if (token && user) {
       set({
+        user,
         token,
         refreshToken,
-        user,
+        permissions: user.permissions || [],
+        roles: user.roles || [],
         isAuthenticated: true,
       });
     }
+  },
+
+  // 权限检查方法
+  hasRole: (role: string) => {
+    const { user } = get();
+    return user?.roles.includes(role) || false;
+  },
+
+  hasPermission: (permission: string) => {
+    const { user } = get();
+    return user?.permissions.includes(permission) || false;
+  },
+
+  hasAnyRole: (roles: string[]) => {
+    const { user } = get();
+    if (!user) return false;
+    return roles.some(role => user.roles.includes(role));
+  },
+
+  hasAnyPermission: (permissions: string[]) => {
+    const { user } = get();
+    if (!user) return false;
+    return permissions.some(permission => user.permissions.includes(permission));
   },
 });

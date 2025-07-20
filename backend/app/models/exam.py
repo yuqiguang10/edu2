@@ -1,111 +1,86 @@
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Boolean
+# backend/app/models/exam.py
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.models.base import Base
 
 
 class Exam(Base):
     """考试表"""
     __tablename__ = "exams"
-    
+
+    id = Column(Integer, primary_key=True, index=True)
     title = Column(String(100), nullable=False)
     description = Column(Text)
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
     subject_id = Column(Integer, ForeignKey("subjects.id"))
     teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False)
-    start_time = Column(DateTime(timezone=True), nullable=False)
-    end_time = Column(DateTime(timezone=True), nullable=False)
-    duration = Column(Integer)  # 分钟
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    duration = Column(Integer)  # 考试时长(分钟)
     total_score = Column(Float, nullable=False)
-    status = Column(String(20), nullable=False, default="draft")  # draft, published, ongoing, completed, cancelled
-    
-    # 关系
-    class_obj = relationship("Class", back_populates="exams")
-    subject = relationship("Subject", back_populates="exams")
-    teacher = relationship("Teacher", back_populates="exams")
+    status = Column(Integer, default=1)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # 关联关系
+    class_ = relationship("Class")
+    subject = relationship("Subject")
+    teacher = relationship("Teacher")
     questions = relationship("ExamQuestion", back_populates="exam")
     records = relationship("ExamRecord", back_populates="exam")
 
 
 class ExamQuestion(Base):
-    """考试-题目关联表"""
+    """考试题目关联表"""
     __tablename__ = "exam_questions"
-    
+
+    id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
     score = Column(Float, nullable=False)
-    sequence = Column(Integer, nullable=False, default=0)
-    
-    # 关系
+    sequence = Column(Integer, default=0)
+    created_at = Column(DateTime, default=func.now())
+
+    # 关联关系
     exam = relationship("Exam", back_populates="questions")
-    question = relationship("Question", back_populates="exam_questions")
+    question = relationship("Question")
 
 
 class ExamRecord(Base):
     """考试记录表"""
     __tablename__ = "exam_records"
-    
+
+    id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
-    start_time = Column(DateTime(timezone=True), nullable=False)
-    submit_time = Column(DateTime(timezone=True))
+    assignment_id = Column(Integer, ForeignKey("homeworks.id"))
+    start_time = Column(DateTime, nullable=False)
+    submit_time = Column(DateTime)
     total_score = Column(Float)
-    status = Column(Integer, nullable=False, default=1)  # 1-进行中，2-已提交，3-已批改
-    
-    # 关系
-    student = relationship("User", back_populates="student_records")
+    status = Column(Integer, default=1)  # 1-进行中, 2-已提交, 3-已批改
+    created_at = Column(DateTime, default=func.now())
+
+    # 关联关系
+    student = relationship("User")
     exam = relationship("Exam", back_populates="records")
-    answers = relationship("ExamAnswer", back_populates="exam_record")
+    homework = relationship("Homework")
+    answers = relationship("ExamAnswerRecord", back_populates="exam_record")
 
 
-class ExamAnswer(Base):
-    """考试答题记���表"""
-    __tablename__ = "exam_answers"
-    
+class ExamAnswerRecord(Base):
+    """考试答题记录表"""
+    __tablename__ = "exam_answer_records"
+
+    id = Column(Integer, primary_key=True, index=True)
     exam_record_id = Column(Integer, ForeignKey("exam_records.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
     answer = Column(Text)
     score = Column(Float)
     is_correct = Column(Boolean)
     review_comment = Column(Text)
-    
-    # 关系
+    created_at = Column(DateTime, default=func.now())
+
+    # 关联关系
     exam_record = relationship("ExamRecord", back_populates="answers")
     question = relationship("Question")
-
-
-class Homework(Base):
-    """作业表"""
-    __tablename__ = "homeworks"
-    
-    title = Column(String(100), nullable=False)
-    description = Column(Text)
-    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
-    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
-    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False)
-    assign_date = Column(DateTime(timezone=True), nullable=False)
-    due_date = Column(DateTime(timezone=True), nullable=False)
-    max_score = Column(Float, default=100)
-    
-    # 关系
-    class_obj = relationship("Class")
-    subject = relationship("Subject")
-    teacher = relationship("Teacher")
-    submissions = relationship("HomeworkSubmission", back_populates="homework")
-
-
-class HomeworkSubmission(Base):
-    """作业提交表"""
-    __tablename__ = "homework_submissions"
-    
-    homework_id = Column(Integer, ForeignKey("homeworks.id"), nullable=False)
-    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    content = Column(Text)
-    attachment = Column(String(255))
-    score = Column(Float)
-    comment = Column(Text)
-    submit_date = Column(DateTime(timezone=True))
-    status = Column(String(20), nullable=False, default="pending")  # pending, submitted, graded
-    
-    # 关系
-    homework = relationship("Homework", back_populates="submissions")
-    student = relationship("User")
