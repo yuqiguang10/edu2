@@ -1,299 +1,490 @@
-// src/pages/student/Dashboard.tsx
-import React, { useEffect } from 'react';
-import { useStore } from '@/store';
-import { useAuth } from '@/hooks/useAuth';
+// frontend/src/pages/student/Dashboard.tsx
+import React, { useState, useEffect } from 'react';
 import {
-  Clock, CheckCircle, Target, TrendingUp, Brain, AlertCircle,
-  BookOpen, Award, Calendar, BarChart3
-} from 'lucide-react';
-import Chart from '@/components/common/Chart';
-import Button from '@/components/common/Button';
+  Card,
+  Row,
+  Col,
+  List,
+  Progress,
+  Tag,
+  Button,
+  Statistic,
+  Calendar,
+  Badge,
+  Timeline,
+  Avatar,
+  Space,
+  Typography,
+  Divider,
+  Alert,
+  Tooltip,
+  Modal
+} from 'antd';
+import {
+  BookOutlined,
+  FileTextOutlined,
+  TrophyOutlined,
+  ClockCircleOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  CalendarOutlined,
+  StarOutlined,
+  BulbOutlined,
+  RocketOutlined,
+  UserOutlined
+} from '@ant-design/icons';
+import moment from 'moment';
+import { classManagementAPI } from '@/api/classManagement';
+import { homeworkAPI } from '@/api/homework';
+import { examAPI } from '@/api/exam';
+import { aiAPI } from '@/api/ai';
+
+const { Title, Text, Paragraph } = Typography;
+
+interface Assignment {
+  id: number;
+  title: string;
+  type: 'homework' | 'exam';
+  due_date: string;
+  status: string;
+  score?: number;
+  submitted: boolean;
+  submit_time?: string;
+}
+
+interface LearningProgress {
+  subject: string;
+  progress: number;
+  total_hours: number;
+  completed_hours: number;
+  knowledge_points: {
+    mastered: number;
+    total: number;
+  };
+}
+
+interface Recommendation {
+  id: number;
+  type: 'question' | 'resource' | 'video';
+  title: string;
+  description: string;
+  difficulty: string;
+  reason: string;
+  priority: number;
+}
+
+interface StudentProfile {
+  learning_style: string;
+  strengths: string[];
+  weaknesses: string[];
+  avg_score: number;
+  study_time_today: number;
+  study_streak: number;
+}
 
 const StudentDashboard: React.FC = () => {
-  const { user } = useAuth();
-  const { recommendations, getRecommendations, loading } = useStore();
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [learningProgress, setLearningProgress] = useState<LearningProgress[]>([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
+  const [myClasses, setMyClasses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<moment.Moment>(moment());
 
   useEffect(() => {
-    if (user) {
-      // 获取AI推荐
-      getRecommendations({
-        userId: user.id,
-        subjectId: 1, // 数学
-        context: {
-          currentLevel: 3,
-          learningGoals: ['提高解题速度', '掌握函数图像'],
-          weakPoints: ['几何证明', '应用题理解']
-        }
-      });
-    }
-  }, [user, getRecommendations]);
+    fetchDashboardData();
+  }, []);
 
-  // 学习统计数据
-  const studyStats = {
-    todayTime: 2.5,
-    completedExercises: 15,
-    accuracy: 85,
-    weeklyGoal: 75
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      const [
+        assignmentsRes,
+        classesRes,
+        profileRes,
+        recommendationsRes
+      ] = await Promise.all([
+        classManagementAPI.getMyAssignments(),
+        classManagementAPI.getMyClasses(),
+        classManagementAPI.getMyProfile(),
+        classManagementAPI.getMyRecommendations()
+      ]);
+
+      setAssignments(assignmentsRes.data.homeworks.concat(assignmentsRes.data.exams));
+      setMyClasses(classesRes.data);
+      setProfile(profileRes.data);
+      setRecommendations(recommendationsRes.data);
+
+      // 模拟学习进度数据
+      setLearningProgress([
+        {
+          subject: '数学',
+          progress: 75,
+          total_hours: 120,
+          completed_hours: 90,
+          knowledge_points: { mastered: 45, total: 60 }
+        },
+        {
+          subject: '语文',
+          progress: 80,
+          total_hours: 100,
+          completed_hours: 80,
+          knowledge_points: { mastered: 32, total: 40 }
+        },
+        {
+          subject: '英语',
+          progress: 65,
+          total_hours: 80,
+          completed_hours: 52,
+          knowledge_points: { mastered: 26, total: 40 }
+        }
+      ]);
+    } catch (error) {
+      console.error('获取仪表盘数据失败:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // 图表数据
-  const progressData = [
-    { name: '周一', score: 78 },
-    { name: '��二', score: 82 },
-    { name: '周三', score: 79 },
-    { name: '周四', score: 85 },
-    { name: '周五', score: 88 },
-    { name: '周六', score: 92 },
-    { name: '周日', score: 89 }
-  ];
+  const getAssignmentStatus = (assignment: Assignment) => {
+    const dueDate = moment(assignment.due_date);
+    const now = moment();
+    
+    if (assignment.submitted) {
+      return { color: 'success', text: '已提交', icon: <CheckCircleOutlined /> };
+    } else if (dueDate.isBefore(now)) {
+      return { color: 'error', text: '已逾期', icon: <ExclamationCircleOutlined /> };
+    } else if (dueDate.diff(now, 'hours') <= 24) {
+      return { color: 'warning', text: '即将截止', icon: <ClockCircleOutlined /> };
+    } else {
+      return { color: 'processing', text: '进行中', icon: <ClockCircleOutlined /> };
+    }
+  };
 
-  const subjectData = [
-    { name: '数学', value: 85 },
-    { name: '英语', value: 78 },
-    { name: '物理', value: 82 },
-    { name: '化学', value: 76 }
-  ];
+  const getCalendarDateCellRender = (date: moment.Moment) => {
+    const dayAssignments = assignments.filter(assignment => 
+      moment(assignment.due_date).isSame(date, 'day')
+    );
 
-  // 近期考试
-  const upcomingExams = [
-    { id: 1, subject: '数学', title: '二次函数单元测试', date: '2024-01-15', time: '09:00' },
-    { id: 2, subject: '英语', title: '阅读理解专项练习', date: '2024-01-18', time: '14:30' },
-    { id: 3, subject: '物理', title: '力学综合测评', date: '2024-01-20', time: '10:00' }
-  ];
+    if (dayAssignments.length === 0) return null;
 
-  // 最新作业
-  const recentHomework = [
-    { id: 1, subject: '数学', title: '函数图像练习', status: 'pending', dueDate: '2024-01-14' },
-    { id: 2, subject: '英语', title: '词汇背诵打卡', status: 'submitted', dueDate: '2024-01-13' },
-    { id: 3, subject: '物理', title: '实验报告', status: 'graded', score: 92, dueDate: '2024-01-12' }
-  ];
+    return (
+      <ul className="events">
+        {dayAssignments.slice(0, 2).map(assignment => (
+          <li key={assignment.id}>
+            <Badge 
+              status={assignment.type === 'homework' ? 'processing' : 'error'}
+              text={assignment.title.length > 8 ? assignment.title.slice(0, 8) + '...' : assignment.title}
+            />
+          </li>
+        ))}
+        {dayAssignments.length > 2 && <li>+{dayAssignments.length - 2} 项</li>}
+      </ul>
+    );
+  };
+
+  const handleStartAssignment = (assignment: Assignment) => {
+    if (assignment.type === 'homework') {
+      // 跳转到作业页面
+      window.location.href = `/student/homework/${assignment.id}`;
+    } else {
+      // 跳转到考试页面
+      window.location.href = `/student/exam/${assignment.id}`;
+    }
+  };
+
+  const handleViewRecommendation = (recommendation: Recommendation) => {
+    Modal.info({
+      title: '学习推荐详情',
+      content: (
+        <div>
+          <p><strong>标题：</strong>{recommendation.title}</p>
+          <p><strong>类型：</strong>{recommendation.type}</p>
+          <p><strong>难度：</strong>{recommendation.difficulty}</p>
+          <p><strong>推荐理由：</strong>{recommendation.reason}</p>
+          <p><strong>描述：</strong>{recommendation.description}</p>
+        </div>
+      ),
+      width: 500
+    });
+  };
 
   return (
-    <div className="space-y-6">
-      {/* 欢迎信息 */}
-      <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-xl">
-        <h1 className="text-2xl font-bold mb-2">
-          早上好，{user?.realName || user?.username}！
-        </h1>
-        <p className="opacity-90">
-          今天是您学习旅程的第 {Math.floor(Math.random() * 100) + 50} 天，继续加油！
-        </p>
-      </div>
-
-      {/* 学习统计卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">今日学习时长</h3>
-              <p className="text-2xl font-bold text-blue-600 mt-1">{studyStats.todayTime}小时</p>
-            </div>
-            <Clock className="w-12 h-12 text-blue-500 opacity-80" />
-          </div>
-          <div className="mt-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">目标: 3小时</span>
-              <span className="text-blue-600">{Math.round((studyStats.todayTime / 3) * 100)}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${Math.min((studyStats.todayTime / 3) * 100, 100)}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">完成练习</h3>
-              <p className="text-2xl font-bold text-green-600 mt-1">{studyStats.completedExercises}题</p>
-            </div>
-            <CheckCircle className="w-12 h-12 text-green-500 opacity-80" />
-          </div>
-          <div className="mt-2">
-            <span className="text-sm text-green-600">+5 比昨天</span>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">正确率</h3>
-              <p className="text-2xl font-bold text-purple-600 mt-1">{studyStats.accuracy}%</p>
-            </div>
-            <Target className="w-12 h-12 text-purple-500 opacity-80" />
-          </div>
-          <div className="mt-2">
-            <span className="text-sm text-purple-600">+3% 比上周</span>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">周目标进度</h3>
-              <p className="text-2xl font-bold text-orange-600 mt-1">{studyStats.weeklyGoal}%</p>
-            </div>
-            <TrendingUp className="w-12 h-12 text-orange-500 opacity-80" />
-          </div>
-          <div className="mt-2">
-            <span className="text-sm text-gray-500">还需努力一点点</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* AI个性化推荐 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold flex items-center">
-              <Brain className="w-6 h-6 mr-2 text-blue-600" />
-              AI个性化推荐
-            </h2>
-            {loading && <div className="text-sm text-blue-600">分析中...</div>}
-          </div>
-
-          {recommendations && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-medium mb-3">推荐练习题</h3>
-                <div className="space-y-2">
-                  {recommendations.questions.slice(0, 3).map(q => (
-                    <div key={q.id} className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
-                      <div>
-                        <span className="font-medium">{q.title}</span>
-                        <div className="text-sm text-gray-500 mt-1">
-                          <span className="mr-4">难度: {q.difficulty}/5</span>
-                          <span>科目: {q.subject}</span>
-                        </div>
-                      </div>
-                      <Button size="sm" variant="outline">
-                        开始练习
-                      </Button>
-                    </div>
-                  ))}
+    <div className="student-dashboard">
+      {/* 欢迎横幅 */}
+      <Card className="welcome-banner" style={{ marginBottom: 24, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+        <Row align="middle">
+          <Col flex="auto">
+            <Title level={3} style={{ color: 'white', margin: 0 }}>
+              欢迎回来！今天也要努力学习哦 🌟
+            </Title>
+            <Text style={{ color: 'rgba(255,255,255,0.8)' }}>
+              {moment().format('YYYY年MM月DD日 dddd')}
+            </Text>
+          </Col>
+          <Col>
+            <Space direction="vertical" align="center">
+              <Avatar size={64} icon={<UserOutlined />} />
+              {profile && (
+                <div style={{ textAlign: 'center' }}>
+                  <div>连续学习 {profile.study_streak} 天</div>
+                  <div>今日学习 {profile.study_time_today} 分钟</div>
                 </div>
-              </div>
+              )}
+            </Space>
+          </Col>
+        </Row>
+      </Card>
 
-              {recommendations.weakPoints.length > 0 && (
+      <Row gutter={[24, 24]}>
+        {/* 左侧主要内容 */}
+        <Col xs={24} lg={16}>
+          {/* 学习统计 */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={12} sm={6}>
+              <Card>
+                <Statistic
+                  title="平均成绩"
+                  value={profile?.avg_score || 0}
+                  precision={1}
+                  valueStyle={{ color: '#3f8600' }}
+                  prefix={<TrophyOutlined />}
+                  suffix="分"
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card>
+                <Statistic
+                  title="待完成作业"
+                  value={assignments.filter(a => !a.submitted && a.type === 'homework').length}
+                  valueStyle={{ color: '#cf1322' }}
+                  prefix={<FileTextOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card>
+                <Statistic
+                  title="即将考试"
+                  value={assignments.filter(a => a.type === 'exam' && moment(a.due_date).diff(moment(), 'days') <= 7).length}
+                  valueStyle={{ color: '#fa8c16' }}
+                  prefix={<BookOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6}>
+              <Card>
+                <Statistic
+                  title="学习时长"
+                  value={profile?.study_time_today || 0}
+                  valueStyle={{ color: '#722ed1' }}
+                  prefix={<ClockCircleOutlined />}
+                  suffix="分钟"
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          {/* 学习进度 */}
+          <Card title="学习进度" style={{ marginBottom: 24 }}>
+            <Row gutter={[16, 16]}>
+              {learningProgress.map((subject, index) => (
+                <Col xs={24} md={8} key={index}>
+                  <div className="subject-progress">
+                    <div className="flex justify-between items-center mb-2">
+                      <Text strong>{subject.subject}</Text>
+                      <Text type="secondary">{subject.progress}%</Text>
+                    </div>
+                    <Progress 
+                      percent={subject.progress} 
+                      strokeColor={{
+                        '0%': '#108ee9',
+                        '100%': '#87d068',
+                      }}
+                      style={{ marginBottom: 8 }}
+                    />
+                    <div className="text-sm text-gray-500">
+                      <div>知识点: {subject.knowledge_points.mastered}/{subject.knowledge_points.total}</div>
+                      <div>学时: {subject.completed_hours}/{subject.total_hours}h</div>
+                    </div>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Card>
+
+          {/* 近期作业和考试 */}
+          <Card 
+            title="近期任务" 
+            extra={<Button type="link" onClick={() => window.location.href = '/student/assignments'}>查看全部</Button>}
+          >
+            <List
+              itemLayout="horizontal"
+              dataSource={assignments.slice(0, 5)}
+              renderItem={(assignment) => {
+                const status = getAssignmentStatus(assignment);
+                return (
+                  <List.Item
+                    actions={[
+                      !assignment.submitted && (
+                        <Button 
+                          type="primary" 
+                          size="small"
+                          onClick={() => handleStartAssignment(assignment)}
+                        >
+                          {assignment.type === 'homework' ? '开始作业' : '进入考试'}
+                        </Button>
+                      ),
+                      assignment.submitted && assignment.score && (
+                        <Tag color="green">得分: {assignment.score}</Tag>
+                      )
+                    ].filter(Boolean)}
+                  >
+                    <List.Item.Meta
+                      avatar={
+                        <Avatar 
+                          icon={assignment.type === 'homework' ? <FileTextOutlined /> : <BookOutlined />}
+                          style={{ 
+                            backgroundColor: assignment.type === 'homework' ? '#1890ff' : '#f5222d' 
+                          }}
+                        />
+                      }
+                      title={
+                        <Space>
+                          {assignment.title}
+                          <Tag color={status.color} icon={status.icon}>
+                            {status.text}
+                          </Tag>
+                        </Space>
+                      }
+                      description={
+                        <div>
+                          <div>截止时间: {moment(assignment.due_date).format('MM-DD HH:mm')}</div>
+                          {assignment.submit_time && (
+                            <div className="text-green-600">
+                              提交时间: {moment(assignment.submit_time).format('MM-DD HH:mm')}
+                            </div>
+                          )}
+                        </div>
+                      }
+                    />
+                  </List.Item>
+                );
+              }}
+            />
+          </Card>
+        </Col>
+
+        {/* 右侧边栏 */}
+        <Col xs={24} lg={8}>
+          {/* AI学习建议 */}
+          <Card 
+            title={
+              <Space>
+                <BulbOutlined style={{ color: '#faad14' }} />
+                AI学习建议
+              </Space>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            {profile && (
+              <div>
+                <Alert
+                  message="个性化学习建议"
+                  description={`根据您的学习风格（${profile.learning_style}），建议您：多做视觉化练习，加强逻辑思维训练。`}
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                
                 <div>
-                  <h3 className="font-medium mb-2">需要加强的知识点</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {recommendations.weakPoints.map(point => (
-                      <span key={point} className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-sm">
-                        {point}
-                      </span>
+                  <Text strong>优势学科:</Text>
+                  <div style={{ marginTop: 8, marginBottom: 16 }}>
+                    {profile.strengths?.map((strength, index) => (
+                      <Tag color="green" key={index}>{strength}</Tag>
+                    ))}
+                  </div>
+                  
+                  <Text strong>需要加强:</Text>
+                  <div style={{ marginTop: 8 }}>
+                    {profile.weaknesses?.map((weakness, index) => (
+                      <Tag color="orange" key={index}>{weakness}</Tag>
                     ))}
                   </div>
                 </div>
+              </div>
+            )}
+          </Card>
+
+          {/* 智能推荐 */}
+          <Card 
+            title={
+              <Space>
+                <RocketOutlined style={{ color: '#722ed1' }} />
+                为你推荐
+              </Space>
+            }
+            style={{ marginBottom: 24 }}
+          >
+            <List
+              size="small"
+              dataSource={recommendations.slice(0, 4)}
+              renderItem={(rec) => (
+                <List.Item>
+                  <List.Item.Meta
+                    avatar={
+                      <Avatar 
+                        size="small"
+                        style={{ 
+                          backgroundColor: rec.type === 'question' ? '#1890ff' : 
+                                           rec.type === 'video' ? '#f5222d' : '#52c41a'
+                        }}
+                      >
+                        {rec.type === 'question' ? '题' : 
+                         rec.type === 'video' ? '视' : '资'}
+                      </Avatar>
+                    }
+                    title={
+                      <div>
+                        <Text ellipsis style={{ width: 120 }}>{rec.title}</Text>
+                        <Tag size="small" color="blue">{rec.difficulty}</Tag>
+                      </div>
+                    }
+                    description={
+                      <Text 
+                        type="secondary" 
+                        ellipsis 
+                        style={{ fontSize: 12 }}
+                        onClick={() => handleViewRecommendation(rec)}
+                      >
+                        {rec.reason}
+                      </Text>
+                    }
+                  />
+                </List.Item>
               )}
+            />
+            <Button 
+              type="link" 
+              block 
+              onClick={() => window.location.href = '/student/recommendations'}
+            >
+              查看更多推荐
+            </Button>
+          </Card>
 
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <h4 className="font-medium text-blue-700 mb-1">下一个目标</h4>
-                <p className="text-sm text-blue-600">{recommendations.nextGoal}</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 学习进度图表 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center">
-            <BarChart3 className="w-6 h-6 mr-2 text-green-600" />
-            本周学习进度
-          </h2>
-          <Chart
-            type="line"
-            data={progressData}
-            height={240}
-            xKey="name"
-            yKey="score"
-            colors={['#3B82F6']}
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 近期考试 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center">
-            <Award className="w-6 h-6 mr-2 text-yellow-600" />
-            近期考试
-          </h2>
-          <div className="space-y-3">
-            {upcomingExams.map(exam => (
-              <div key={exam.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                <div>
-                  <div className="font-medium">{exam.title}</div>
-                  <div className="text-sm text-gray-500 mt-1">
-                    {exam.subject} • {exam.date} {exam.time}
-                  </div>
-                </div>
-                <Button size="sm" variant="outline">
-                  准备考试
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 最新作业 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center">
-            <BookOpen className="w-6 h-6 mr-2 text-purple-600" />
-            最新作业
-          </h2>
-          <div className="space-y-3">
-            {recentHomework.map(hw => (
-              <div key={hw.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                <div className="flex-1">
-                  <div className="font-medium">{hw.title}</div>
-                  <div className="text-sm text-gray-500 mt-1">
-                    {hw.subject} • 截止: {hw.dueDate}
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  {hw.status === 'pending' && (
-                    <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs">
-                      待完成
-                    </span>
-                  )}
-                  {hw.status === 'submitted' && (
-                    <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
-                      已提交
-                    </span>
-                  )}
-                  {hw.status === 'graded' && (
-                    <>
-                      <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">
-                        已批改
-                      </span>
-                      <span className="text-sm font-medium text-green-600">
-                        {hw.score}分
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 各��目成绩分布 */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h2 className="text-xl font-semibold mb-4">各科目成绩分布</h2>
-        <Chart
-          type="bar"
-          data={subjectData}
-          height={300}
-          xKey="name"
-          yKey="value"
-          colors={['#3B82F6', '#EF4444', '#10B981', '#F59E0B']}
-        />
-      </div>
+          {/* 学习日历 */}
+          <Card title={<Space><CalendarOutlined />学习日历</Space>}>
+            <Calendar
+              fullscreen={false}
+              value={selectedDate}
+              onSelect={setSelectedDate}
+              dateCellRender={getCalendarDateCellRender}
+            />
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 };
