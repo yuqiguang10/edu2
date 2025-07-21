@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # Superuser
     FIRST_SUPERUSER: str = "admin@edu-platform.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin123456"
+    # AI配置
+    AI_MODEL_PROVIDER: str = os.getenv("AI_MODEL_PROVIDER", "openai")
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
+    
+    # AI Agent配置
+    AI_AGENT_TIMEOUT: int = int(os.getenv("AI_AGENT_TIMEOUT", "300"))  # 5分钟
+    AI_RECOMMENDATION_CACHE_TTL: int = int(os.getenv("AI_RECOMMENDATION_CACHE_TTL", "1800"))  # 30分钟
     
     class Config:
         env_file = ".env"

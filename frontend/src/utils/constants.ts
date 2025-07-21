@@ -96,10 +96,13 @@ export const API_ENDPOINTS = {
   
   // AI相关
   AI: {
-    CHAT: '/api/v1/ai/chat',
+    AGENT_INIT: '/api/v1/ai/agent/initialize',
+    AGENT_ACTION: '/api/v1/ai/agent/action',
+    AGENT_STATUS: '/api/v1/ai/agent/status',
+    AGENT_SHUTDOWN: '/api/v1/ai/agent/shutdown',
     RECOMMENDATIONS: '/api/v1/ai/recommendations',
-    ANALYSIS: '/api/v1/ai/analysis',
-    GENERATE_EXAM: '/api/v1/ai/generate-exam',
+    CHAT: '/api/v1/ai/chat',
+    LEARNING_ANALYSIS: '/api/v1/ai/learning-analysis',
   },
 } as const;
 
@@ -113,3 +116,4 @@ export const ERROR_MESSAGES = {
   VALIDATION_ERROR: '数据验证失败',
   UNKNOWN_ERROR: '未知错误，请联系管理员',
 } as const;
+
